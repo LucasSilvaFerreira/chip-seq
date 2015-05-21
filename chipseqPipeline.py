@@ -7,7 +7,7 @@ import re
 
 
 def create_config_file():
-    config='[configurações_gerais]\nprocessadores=\nindex_bowtie=\nchr_size_file=\n\n<marca1>\nnome_marca=\n' \
+    config='[configurações_gerais]\nprocessadores=\nindex_bowtie=\nchr_size_file=\nfilter_qual=FALSE\n<marca1>\nnome_marca=\n' \
            'sra_file=\n\n<marca1>\nnome_marca=\nsra_file=\n\n\n\n#adicione novas entradas seguindo o mesmo esquema\n' \
            '#   <marcaX>\n#   nome_marca=\n# sra_file=\n#\n'
 
@@ -87,12 +87,12 @@ def mapeamento(index, arquivo_fasta_filtrado, processadores):
 
     if arquivo_fasta_filtrado.split('.')[-1].lower() == 'fa':
         out_sam= arquivo_fasta_filtrado.replace('.fa', '.sam')
-        comando='ls ;bowtie2 -x {index_file} -p {processadores} -f {arquivo_fasta_filtrado} > {saida_sam}'.format(index_file = index,
+        comando='bowtie2 -x {index_file} -p {processadores} -f {arquivo_fasta_filtrado} > {saida_sam}'.format(index_file = index,
                                                                                               processadores = processadores,
                                                                                       arquivo_fasta_filtrado =arquivo_fasta_filtrado,
                                                                                               saida_sam=out_sam)
 
-
+    print comando
     os.system(comando)
     return out_sam
 
@@ -145,8 +145,8 @@ def main():
             config_geral = re.split('\[configurações_gerais\]\n', arquivo)[1].split('<')[0]
             parse_geral = [valor for valor in config_geral.split('\n') if valor and '#' not in valor]
             #print parse_geral
-            pc, ib, cs = parse_geral
-            if "" in [elemento.split('=')[1] for elemento in [pc, ib, cs]]:
+            pc, ib, cs, qc= parse_geral
+            if "" in [elemento.split('=')[1] for elemento in [pc, ib, cs, qc]]:
                 sys.stderr.write("campos vazios ou corrompidos encotrados no campo de CONFIGURAÇÕES GERAIS  arquivo de configuração.\n")
                 exit()
 
@@ -173,7 +173,7 @@ def main():
                 bowtie_index = ib.split('=')[1]
                 processadores = pc.split('=')[1]
                 chr_size_file = cs.split('=')[1]
-
+                fast_qual_control= str(qc.split('=')[1]).upper()
                 if '' in [sra_file, diretorio] :
                     sys.stderr.write("campos vazios ou corrompidos encotrados no campo das AMOSTRAS(sra_name ou nome_marca)  arquivo de configuração.\n")
                 sys.stderr.write('Rodando amostras para arquivo {}\n'.format(diretorio))
@@ -181,7 +181,15 @@ def main():
                 #print diretorio, sra_file, bowtie_index
                 ##############pipeline#####################
                 sraToFastq(sra_file, nome_diretorio)
-                fasta_gerado = controle_qualidade(sra_file)
+                if fast_qual_control == 'TRUE':
+                    fasta_gerado = controle_qualidade(sra_file)
+                elif fast_qual_control == 'FALSE':
+                    sys.stderr.write("Pulando etapa de filtragem..." + "\n")
+                    fasta_gerado = sra_file.split('/')[-1].replace(".sra", ".fastq")
+                else:
+                    sys.stderr.write("Flag de qualidade não encontrada (filter_qual=TRUE ou filter_qual=FALSE)\nUtilizando modo sem filtros de qualidade" + "\n")
+                    fasta_gerado = sra_file.split('/')[-1].replace(".sra", ".fastq")
+
                 arquivo_sam = mapeamento(bowtie_index, fasta_gerado, processadores)
                 criando_diretorio_tag(arquivo_sam)
                 find_peaks()
@@ -202,14 +210,16 @@ def main():
     #caso não exista uma arquivo de configuração
     else:
 
-        if  len(sys.argv) != 11:
+        if '-qc' in sys.argv and  len(sys.argv) != 12 or '-qc' not in sys.argv and len(sys.argv) != 11:
             sys.stderr.write('----ERRO---!\n Entre com os seguintes parametros\n-d  nome do diretorio a ser criado \n-sra nome do arquivo sra utilizado na analise (ou arquivo fastq/fa)'
-                             '\n-b index do bowtie\n-p numero de processadores utilizados no alinhamento \n-cs arquivo contendo o tamanho dos cromossomos \n'
-                             'Use -config <arquivo de configuração> para rodar em lote (utilize -create_cfg para criar um arquivo novo de configuração)\n')
+                             '\n-b index do bowtie\n-p numero de processadores utilizados no alinhamento \n-cs arquivo contendo o tamanho dos cromossomos \n-qc adicione essa flag caso '
+                             'queira filtrar os dados de entrada \n'
+                             'Use -config <arquivo de configuração> para rodar em lote (utilize -create_cfg para criar um arquivo novo de configuração)\nNa duvida sempre crie outro arquivo'
+                             ' de CONFIGURAÇÕES\n')
             exit()
 
 
-        print "começando programa"
+        print "Iniciando programa"
         temp_fastq_filtrado=''
         diretorio = sys.argv[sys.argv.index('-d')+1]
         nome_diretorio = diretorio.split('/')[-1]
@@ -217,10 +227,21 @@ def main():
         bowtie_index = sys.argv[sys.argv.index('-b')+1]
         processadores = sys.argv[sys.argv.index('-p')+1]
         chr_size_file = sys.argv[sys.argv.index('-cs')+1]
+
+        if '-qc' in sys:
+            quality_control_flag = True
+        else:
+            quality_control_flag = False
+
         print diretorio, sra_file, bowtie_index
+
         ##############pipeline#####################
         sraToFastq(sra_file, nome_diretorio)
-        fasta_gerado = controle_qualidade(sra_file)
+        if quality_control_flag:
+            fasta_gerado = controle_qualidade(sra_file)
+        else:
+            fasta_gerado = sra_file.split('/')[-1].replace(".sra", ".fastq")
+
         arquivo_sam = mapeamento(bowtie_index, fasta_gerado, processadores)
         criando_diretorio_tag(arquivo_sam)
         find_peaks()
